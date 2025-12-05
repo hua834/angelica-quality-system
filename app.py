@@ -7,7 +7,8 @@ import platform
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
-import matplotlib
+import matplotlib.font_manager as fm # 引入字体管理器
+import urllib.request # 用于下载字体
 
 # ==================== 0. 页面配置 ====================
 st.set_page_config(
@@ -124,7 +125,50 @@ class IntelligentQualityModel:
             contributions.append(contrib)
         return score, contributions, SENSOR_COLS
 
-# ==================== 3. 辅助函数 ====================
+# ==================== 3. 字体修复核心函数 (新增) ====================
+@st.cache_resource
+def get_chinese_font():
+    """
+    检查系统是否有中文字体，如果没有（比如在云端Linux），则自动下载 SimHei.ttf
+    返回字体属性对象 FontProperties
+    """
+    # 1. 首先尝试获取系统字体 (Windows/Mac通常有)
+    system_fonts = fm.findSystemFonts()
+    # 常见的中文系统字体名
+    common_cn_fonts = ['SimHei', 'Microsoft YaHei', 'PingFang SC', 'Heiti TC', 'SimSun']
+    
+    # 尝试查找已安装的字体
+    found_font_path = None
+    for font_name in common_cn_fonts:
+        try:
+            # matplotlib 的 findfont 有时候不准，我们遍历列表
+            for sys_font_path in system_fonts:
+                if font_name in sys_font_path: # 简单匹配文件名
+                    found_font_path = sys_font_path
+                    break
+            if found_font_path: break
+        except:
+            continue
+            
+    # 如果系统里有，直接用
+    if found_font_path:
+        return fm.FontProperties(fname=found_font_path)
+    
+    # 2. 如果系统没有 (比如在 Streamlit Cloud)，则下载
+    font_filename = "SimHei.ttf"
+    if not os.path.exists(font_filename):
+        # 这是一个稳定的 GitHub 镜像源，包含 SimHei 字体
+        url = "https://github.com/StellarCN/scp_zh/raw/master/fonts/SimHei.ttf"
+        try:
+            with st.spinner("正在为云端服务器下载中文字体，请稍候..."):
+                urllib.request.urlretrieve(url, font_filename)
+        except Exception as e:
+            st.error(f"字体下载失败，图表可能无法显示中文: {e}")
+            return None
+            
+    return fm.FontProperties(fname=font_filename)
+
+# ==================== 4. 辅助函数 ====================
 def generate_demo_data():
     np.random.seed(42)
     n = 30
@@ -138,27 +182,14 @@ def generate_demo_data():
 
 def plot_contribution(names, values):
     """
-    【图表终极修复版】
-    1. 动态扩展坐标轴范围，彻底解决负数标签重叠问题
-    2. 智能计算标签偏移量，解决正数标签离太远问题
+    【云端兼容修复版】
+    使用 FontProperties 强制指定字体
     """
-    # 字体配置
-    sys_str = platform.system()
-    if sys_str == "Windows":
-        font_options = ['Microsoft YaHei', 'SimHei', 'SimSun']
-    elif sys_str == "Darwin":
-        font_options = ['Arial Unicode MS', 'PingFang SC']
-    else:
-        font_options = ['WenQuanYi Micro Hei']
+    # 获取字体属性
+    font_prop = get_chinese_font()
     
+    # 解决负号显示问题
     plt.rcParams['axes.unicode_minus'] = False
-    for font in font_options:
-        try:
-            matplotlib.font_manager.fontManager.findfont(font)
-            plt.rcParams['font.sans-serif'] = [font] + plt.rcParams['font.sans-serif']
-            break
-        except:
-            continue
 
     df_chart = pd.DataFrame({'Feature': names, 'Impact': values})
     df_chart['Abs_Impact'] = df_chart['Impact'].abs()
@@ -170,25 +201,23 @@ def plot_contribution(names, values):
     bars = ax.barh(df_chart['Feature'], df_chart['Impact'], color=colors, height=0.6)
     
     ax.axvline(0, color='black', linewidth=0.8, linestyle='--')
-    ax.set_title("指标贡献度归因分析 (SHAP 简化版)", fontsize=12, pad=15, fontweight='bold')
-    ax.set_xlabel("← 负向拉低分数 | 正向提升分数 →", fontsize=10)
+    
+    # === 使用 fontproperties 参数强制应用中文字体 ===
+    ax.set_title("指标贡献度归因分析 (SHAP 简化版)", fontsize=12, pad=15, fontweight='bold', fontproperties=font_prop)
+    ax.set_xlabel("← 负向拉低分数 | 正向提升分数 →", fontsize=10, fontproperties=font_prop)
+    
+    # 设置 Y 轴标签字体
+    ax.set_yticklabels(df_chart['Feature'], fontproperties=font_prop)
+    
     ax.grid(axis='x', linestyle='--', alpha=0.3)
     
-    # === 关键修复：智能计算坐标轴范围和标签位置 ===
-    
-    # 1. 获取当前数据的极值
+    # 智能坐标轴范围
     x_min, x_max = df_chart['Impact'].min(), df_chart['Impact'].max()
-    
-    # 2. 强制给左右两边留出 20% 的余量 (这能确保负数标签绝对不会撞到左边的字)
-    # 如果全正或全负，也要保证有空间
     x_range = x_max - x_min
-    if x_range == 0: x_range = 1.0 # 防止除零
-    
+    if x_range == 0: x_range = 1.0
     margin = x_range * 0.2
-    # 设定新的坐标轴范围
     ax.set_xlim(min(0, x_min) - margin, max(0, x_max) + margin)
     
-    # 3. 计算一个很小的动态偏移量 (紧贴柱子)
     offset = x_range * 0.02 
 
     for bar in bars:
@@ -196,19 +225,16 @@ def plot_contribution(names, values):
         y_pos = bar.get_y() + bar.get_height()/2
         
         if width >= 0:
-            # 正向：标签在柱子右侧，紧贴
             ax.text(width + offset, y_pos, f'+{width:.3f}', 
                     va='center', ha='left', fontsize=9, color='#333333', fontweight='bold')
         else:
-            # 负向：标签在柱子左侧，紧贴
-            # 因为坐标轴已经向左扩展了，所以这里放心往左放，不会重叠
             ax.text(width - offset, y_pos, f'{width:.3f}', 
                     va='center', ha='right', fontsize=9, color='#333333', fontweight='bold')
 
     plt.tight_layout()
     return fig
 
-# ==================== 4. 主程序 ====================
+# ==================== 5. 主程序 ====================
 
 st.title("🧠 酒当归质量智能决策系统")
 st.markdown("Intelligent Quality Decision System (IQDS) | **Multi-Source Data Fusion**")
