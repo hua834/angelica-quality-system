@@ -5,7 +5,95 @@ import { CHEM_COLS, TYPE_CENTROIDS } from '../constants';
 import { ChemicalData } from '../types';
 
 // ==========================================
-// 1. 数据准备与切分
+// 0. 核心算法工具函数 (新增: 统计与权重计算)
+// ==========================================
+
+const mean = (data: number[]) => data.reduce((a, b) => a + b, 0) / data.length;
+
+// 样本标准差
+const std = (data: number[]) => {
+  const m = mean(data);
+  return Math.sqrt(data.reduce((a, b) => a + Math.pow(b - m, 2), 0) / (data.length - 1));
+};
+
+// 皮尔逊相关系数
+const pearson = (x: number[], y: number[]) => {
+  const mx = mean(x), my = mean(y);
+  const num = x.reduce((a, val, i) => a + (val - mx) * (y[i] - my), 0);
+  const den = Math.sqrt(x.reduce((a, val) => a + Math.pow(val - mx, 2), 0) * y.reduce((a, val) => a + Math.pow(val - my, 2), 0));
+  return den === 0 ? 0 : num / den;
+};
+
+/**
+ * 实现 CRITIC-熵权 融合算法 (各 50% 权重)
+ * 基于 TRAINING_DATA 自动计算指标权重
+ */
+const calculateHybridWeights = () => {
+  const keys = CHEM_COLS.map(c => c.key);
+  const m = TRAINING_DATA.length;
+  // 1. 数据提取与归一化 (Min-Max)
+  const rawCols = keys.map(key => TRAINING_DATA.map(d => Number((d as any)[key] || 0)));
+  const normCols = rawCols.map((col, i) => {
+      const min = Math.min(...col);
+      const max = Math.max(...col);
+      const range = max - min || 1e-6;
+      const isBetter = CHEM_COLS[i].better;
+      // 正向指标: (x-min)/range, 负向指标: (max-x)/range
+      return col.map(v => isBetter ? (v - min)/range : (max - v)/range);
+  });
+
+  // 2. CRITIC 权重计算
+  // C_j = sigma_j * sum(1 - r_ij)
+  const sigmas = normCols.map(col => std(col));
+  const correlations = normCols.map((colI, i) => 
+      normCols.map((colJ, j) => pearson(colI, colJ))
+  );
+  const C = sigmas.map((sigma, j) => {
+      const sumConflict = correlations[j].reduce((acc, r) => acc + (1 - r), 0);
+      return sigma * sumConflict;
+  });
+  const sumC = C.reduce((a, b) => a + b, 0);
+  const wCritic = C.map(v => v / sumC);
+
+  // 3. 熵权法权重计算
+  // E_j = -k * sum(p_ij * ln(p_ij))
+  const k = 1 / Math.log(m);
+  const wEntropyRaw = normCols.map(col => {
+      // 平移避免 log(0)
+      const shifted = col.map(v => v + 1e-4); 
+      const sumCol = shifted.reduce((a, b) => a + b, 0);
+      const P = shifted.map(v => v / sumCol);
+      
+      const Entropy = -k * P.reduce((acc, p) => acc + p * Math.log(p), 0);
+      return 1 - Entropy; // 信息冗余度 d_j
+  });
+  const sumD = wEntropyRaw.reduce((a, b) => a + b, 0);
+  const wEntropy = wEntropyRaw.map(v => v / sumD);
+
+  // 4. 融合权重 (0.5 : 0.5)
+  const ALPHA = 0.5;
+  const wFused = wCritic.map((wc, i) => ALPHA * wc + (1 - ALPHA) * wEntropy[i]);
+  
+  // 归一化最终权重
+  const sumFused = wFused.reduce((a, b) => a + b, 0);
+  const finalWeights = wFused.map(v => v / sumFused);
+
+  console.log("📊 算法权重计算完成:", {
+     metrics: keys,
+     wCritic: wCritic.map(n=>n.toFixed(4)),
+     wEntropy: wEntropy.map(n=>n.toFixed(4)),
+     final: finalWeights.map(n=>n.toFixed(4))
+  });
+
+  return finalWeights;
+};
+
+// 预计算权重，避免每次评分时重复计算
+const CALCULATED_WEIGHTS = calculateHybridWeights();
+
+
+// ==========================================
+// 1. 数据准备与切分 (保持原逻辑)
 // ==========================================
 
 // 提取标签映射
@@ -18,8 +106,7 @@ const CHEM_KEYS = ['polysaccharide', 'ferulicAcid', 'totalAsh', 'acidInsolubleAs
 const Q_MARKER_KEYS = ['ferulicAcid', 'extractContent', 'volatileOil'];
 const SENSOR_KEYS = ['sensor_1', 'sensor_2', 'sensor_3', 'sensor_4', 'sensor_5', 'sensor_6', 'sensor_7', 'sensor_8', 'sensor_9', 'sensor_10'];
 
-// *** 关键修改：切分训练集和测试集 ***
-// 我们生成的数据表里，最后 10 条是专门生成的测试集 (索引 70-79)
+// *** 切分训练集和测试集 ***
 const TEST_SIZE = 10;
 const SPLIT_INDEX = TRAINING_DATA.length - TEST_SIZE;
 
@@ -27,7 +114,7 @@ const trainSet = TRAINING_DATA.slice(0, SPLIT_INDEX); // 前 70 条
 const testSet = TRAINING_DATA.slice(SPLIT_INDEX);     // 后 10 条
 
 // ==========================================
-// 2. 模型定义
+// 2. 模型定义 (保持原逻辑)
 // ==========================================
 let chemModel: any = null;
 let qMarkerModel: any = null;
@@ -92,7 +179,7 @@ const trainModels = () => {
 trainModels();
 
 // ==========================================
-// 3. 辅助计算 (TOPSIS 评分) - 保持不变
+// 3. 辅助计算 (TOPSIS 评分) - 逻辑修改：使用计算权重
 // ==========================================
 export const calculateQualityScore = (input: Partial<ChemicalData>): number => {
   const standardize = (val: number, min: number, max: number, isBetter: boolean) => {
@@ -100,7 +187,8 @@ export const calculateQualityScore = (input: Partial<ChemicalData>): number => {
     return isBetter ? (val - min) / range : (max - val) / range;
   };
   
-  const weights = [0.10, 0.25, 0.10, 0.05, 0.15, 0.10, 0.25]; 
+  // 修改处：使用实时计算的融合权重，而非硬编码数组
+  const weights = CALCULATED_WEIGHTS;
   const keys = CHEM_COLS.map(c => c.key);
   
   const normalized = keys.map((key, i) => {
@@ -161,3 +249,4 @@ export const identifySample = (input: Record<string, number>) => {
 
 export const initModel = async () => { return true; };
 export const predict = identifySample;
+
