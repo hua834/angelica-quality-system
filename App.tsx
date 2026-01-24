@@ -266,7 +266,7 @@ const App: React.FC = () => {
               ) : (
                 <>
                   <BoltIcon className="w-6 h-6" />
-                  执行多维收敛判定
+                  开始鉴定
                 </>
               )}
             </button>
@@ -337,7 +337,7 @@ const App: React.FC = () => {
               ) : (
                 <div className="text-slate-500 italic flex flex-col items-center justify-center h-full gap-4 text-center">
                    <ServerIcon className="w-12 h-12 opacity-10" />
-                   <p>等待指令集触发...<br/>请完成数据录入后点击 [执行多维收敛判定]</p>
+                   <p>等待指令集触发...<br/>请完成数据录入后点击 [开始鉴定]</p>
                 </div>
               )}
             </div>
