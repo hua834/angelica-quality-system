@@ -4,7 +4,6 @@ import {
   LightBulbIcon, 
   CpuChipIcon, 
   ArrowPathIcon,
-  DocumentMagnifyingGlassIcon,
   CheckBadgeIcon,
   ExclamationTriangleIcon,
   ShieldCheckIcon,
@@ -13,11 +12,11 @@ import {
   FingerPrintIcon,
   ChartBarIcon,
   ServerIcon,
-  AcademicCapIcon,
   BoltIcon
 } from '@heroicons/react/24/outline';
-import { CHEM_COLS, SENSOR_COLS, SAMPLE_TYPES, TYPE_CENTROIDS } from './constants';
+import { CHEM_COLS, SENSOR_COLS, TYPE_CENTROIDS } from './constants';
 import { IdentificationMode, PredictionResult } from './types';
+// @ts-ignore
 import { calculateQualityScore, identifySample } from './utils/calculations';
 import { 
   BarChart, 
@@ -54,36 +53,52 @@ const App: React.FC = () => {
 
   const runIdentification = async () => {
     setLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // 保持原来的模拟延迟，让用户有感知
+    await new Promise(resolve => setTimeout(resolve, 800));
     
-    let pred: any;
-    let score = 0;
+    try {
+        let pred: any;
+        let score = 0;
+        let currentInputs = {};
 
-    if (mode === IdentificationMode.FULL_CHEM) {
-      const chemInputs = Object.fromEntries(CHEM_COLS.map(c => [c.key, inputs[c.key]]));
-      pred = identifySample(chemInputs);
-      score = calculateQualityScore(chemInputs);
-    } else if (mode === IdentificationMode.Q_MARKER) {
-      const qInput = { 
-        ferulicAcid: inputs['ferulicAcid'] || 0, 
-        extractContent: inputs['extractContent'] || 0, 
-        volatileOil: inputs['volatileOil'] || 0 
-      };
-      pred = identifySample(qInput);
-      score = calculateQualityScore(qInput as any);
-    } else {
-      const sensorInputs = Object.fromEntries(SENSOR_COLS.map(s => [s.key, inputs[s.key]]));
-      pred = identifySample(sensorInputs);
-      const chemPart = Object.fromEntries(CHEM_COLS.map(c => [c.key, inputs[c.key]]));
-      score = calculateQualityScore(chemPart);
+        // 构造输入数据
+        if (mode === IdentificationMode.FULL_CHEM) {
+          currentInputs = Object.fromEntries(CHEM_COLS.map(c => [c.key, inputs[c.key]]));
+        } else if (mode === IdentificationMode.Q_MARKER) {
+          currentInputs = { 
+            ferulicAcid: inputs['ferulicAcid'] || 0, 
+            extractContent: inputs['extractContent'] || 0, 
+            volatileOil: inputs['volatileOil'] || 0 
+          };
+        } else {
+          currentInputs = Object.fromEntries(SENSOR_COLS.map(s => [s.key, inputs[s.key]]));
+        }
+
+        // 调用算法
+        if (identifySample) {
+           pred = identifySample(currentInputs);
+        }
+
+        // 计算分数
+        if (mode === IdentificationMode.ENOSE) {
+           const chemPart = Object.fromEntries(CHEM_COLS.map(c => [c.key, inputs[c.key]]));
+           score = calculateQualityScore(chemPart);
+        } else {
+           score = calculateQualityScore(currentInputs as any);
+        }
+
+        setResult({
+          ...pred,
+          qualityScore: score,
+          qMarkers: ['阿魏酸含量', '浸出物含量', '挥发油含量']
+        } as PredictionResult);
+
+    } catch (e) {
+        console.error("Error:", e);
+        alert("计算服务异常");
+    } finally {
+        setLoading(false);
     }
-
-    setResult({
-      ...pred,
-      qualityScore: score,
-      qMarkers: ['阿魏酸含量', '浸出物含量', '挥发油含量']
-    } as PredictionResult);
-    setLoading(false);
   };
 
   const chartData = useMemo(() => {
@@ -130,7 +145,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Header */}
+      {/* Header - 保持原始界面 */}
       <header className="gradient-bg text-white py-6 px-8 shadow-lg flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div className="bg-white/10 p-2 rounded-lg">
@@ -308,14 +323,17 @@ const App: React.FC = () => {
                       </div>
                     </>
                   )}
+                  {/* === 核心修改部分：替换高斯描述为随机森林描述 === */}
                   <div className="flex gap-2">
                     <span className="text-slate-500">[MODEL]</span>
-                    <span className="text-indigo-400">Random Forest Ensemble: 启动 500 棵子树执行异步推理...</span>
+                    <span className="text-indigo-400">Random Forest Ensemble: 启动 50 棵决策树并行推理...</span>
                   </div>
                   <div className="flex gap-2">
-                    <span className="text-slate-500">[MATCH]</span>
-                    <span className="text-amber-400">高斯混合模型匹配度 P(y|X) = { (result.confidence).toFixed(4) }，显著性水平 α=0.01。</span>
+                    <span className="text-slate-500">[VOTE]</span>
+                    <span className="text-amber-400">集成投票 (Ensemble Voting): "{result.type}" 获得多数票支持 (Confidence={(result.confidence * 100).toFixed(2)}%)。</span>
                   </div>
+                  {/* === 修改结束 === */}
+                  
                   <div className="mt-4 pt-3 border-t border-white/10 text-white">
                     <p className="text-slate-500 italic mb-2"># 决策内核输出结论 (Kernel Output)</p>
                     <div className="grid grid-cols-2 gap-4">
@@ -501,7 +519,7 @@ const App: React.FC = () => {
                         科研辅助决策与工艺溯源建议
                       </h4>
                       <p className="text-indigo-200/60 text-sm mt-1 italic">
-                        {mode === IdentificationMode.ENOSE ? '基于 PEN3 响应特征的嗅觉指纹成分深度解析' : '基于多变量统计学分析 (MVA) 的工艺模型映射'}
+                        {mode === IdentificationMode.ENOSE ? '基于 PEN3 响应特征的挥发性成分 (VOCs) 深度解析' : '基于多变量统计学分析 (MVA) 的工艺模型映射'}
                       </p>
                     </div>
                   </div>
@@ -543,11 +561,11 @@ const App: React.FC = () => {
                         <div className="bg-white/5 p-5 rounded-2xl border border-white/10 hover:bg-white/10 transition-all hover:scale-[1.02] duration-300">
                           <h5 className="text-amber-400 text-xs font-black uppercase tracking-widest mb-2 flex items-center gap-2">
                             <span className="w-1.5 h-1.5 bg-amber-400 rounded-full"></span>
-                            {mode === IdentificationMode.ENOSE ? '气味指纹成分解析' : '核心质控指标关联评估'}
+                            {mode === IdentificationMode.ENOSE ? '气味指纹成分解析' : 'Q-Marker 关联评估'}
                           </h5>
                           <p className="text-indigo-50 text-xs leading-relaxed">
                             {mode === IdentificationMode.ENOSE ? 
-                              `PEN3 传感器阵列显示 W1W (硫化合物) 与 W2S (醇类) 响应值波动显著。该指纹特征与 ${result.type} 的标准嗅觉轮廓匹配度极高，暗示特征香气成分已达标。` :
+                              `PEN3 传感器阵列显示 W1W (硫化合物) 与 W2S (醇类) 响应值波动显著。该指纹特征与 ${result.type} 的标准 VOC 轮廓匹配度极高，暗示特征香气成分已达标。` :
                               `核心理化指标表现出明显的聚类特征。建议进一步通过 HPLC-Q-TOF/MS 技术验证 ${result.qMarkers[0]} 在炮制过程中的动态阈值，确立标志物的科学依据。`}
                           </p>
                         </div>
@@ -616,7 +634,7 @@ const App: React.FC = () => {
         </section>
       </main>
 
-      {/* Footer */}
+      {/* Footer - 保持原始界面 */}
       <footer className="py-10 px-8 text-center bg-white border-t border-slate-200">
         <div className="max-w-4xl mx-auto space-y-4">
           <p className="text-slate-900 font-bold text-sm tracking-widest uppercase flex items-center justify-center gap-2">
