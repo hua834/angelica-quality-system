@@ -191,7 +191,7 @@ const App: React.FC = () => {
               {[
                 { id: IdentificationMode.ENOSE, label: '电子鼻嗅觉指纹图谱鉴别与评价（无损鉴别）', icon: CommandLineIcon, desc: 'Airsense 传感器阵列模式识别' },
                 { id: IdentificationMode.Q_MARKER, label: '核心质控指标鉴别与评价（优项鉴别）', icon: LightBulbIcon, desc: '关键质量评价成分精准定位' },
-                { id: IdentificationMode.FULL_CHEM, label: '多维理化指标全映射鉴别与评价'（全息鉴别）, icon: FingerPrintIcon, desc: 'HPLC/GC 组分协同回归分析' }
+                { id: IdentificationMode.FULL_CHEM, label: '多维理化指标全映射鉴别与评价（全息鉴别）', icon: FingerPrintIcon, desc: 'HPLC/GC 组分协同回归分析' }
               ].map(m => (
                 <button
                   key={m.id}
