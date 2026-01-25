@@ -381,7 +381,7 @@ const App: React.FC = () => {
                 <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
                   <div>
                     <span className="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-black uppercase tracking-widest mb-4">
-                      {mode === IdentificationMode.ENOSE ? '挥发性指纹判定报告' : '质量鉴定分析报告'}
+                      {mode === IdentificationMode.ENOSE ? '挥发性指纹判定结果' : '质量鉴定分析结果'}
                     </span>
                     <h3 className="text-slate-400 font-bold text-xs uppercase mb-1">系统判定炮制归属：</h3>
                     <div className="text-6xl font-black text-slate-900 mb-6 tracking-tighter flex items-baseline gap-3">
